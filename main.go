@@ -7,13 +7,12 @@ import (
 	"net/http"
 	"strings"
 	"regexp"
-	"time"
-	"github.com/ximply/ping_exporter/cache"
 	"github.com/bogdanovich/dns_resolver"
 	"fmt"
 	"github.com/robfig/cron"
 	"io"
 	"github.com/ximply/ping_exporter/ping"
+	"sync"
 )
 
 var (
@@ -30,6 +29,9 @@ type DestAddr struct {
 	Domain string
 }
 
+var lock sync.RWMutex
+var g_keyList string
+var g_statMap map[string]ping.PingSt
 var destList []DestAddr
 var doing bool
 
@@ -77,51 +79,53 @@ func doWork() {
 		}
 	}
 
-	cache.GetInstance().Add("keyList", 3 * time.Minute, keyList)
+	lock.Lock()
+	g_keyList = keyList
+    lock.Unlock()
 
+	var pingStatMap map[string]ping.PingSt
+	pingStatMap = make(map[string]ping.PingSt)
 	for k, _ := range ipMap {
-		//ping.SystemCmdPing(k, *count)
-		ping.StartPing(k, *count)
+		stat := &ping.PingSt{}
+		ping.StartPing(k, *count, stat)
+		pingStatMap[k] = *stat
 	}
 
 	for _, i := range dl {
 		l := strings.Split(i, "|")
-		ok, stat := cache.GetInstance().Value(l[1])
-		if ok && stat != nil {
-			cache.GetInstance().Add(fmt.Sprintf("%s|%s", l[0], l[1]), 3 * time.Minute, stat.(ping.PingSt))
+		if v, ok := pingStatMap[l[1]]; ok {
+            lock.Lock()
+            g_statMap[fmt.Sprintf("%s|%s", l[0], l[1])] = v
+            lock.Unlock()
 		}
 	}
+
 	doing = false
 }
 
 func metrics(w http.ResponseWriter, r *http.Request) {
-	ok, kl := cache.GetInstance().Value("keyList")
-	if !ok {
-		io.WriteString(w, "")
-		return
-	}
-	if kl == nil {
-		io.WriteString(w, "")
-		return
-	}
-	keyList := strings.Split(kl.(string), ",")
+	lock.RLock()
+	keyList := strings.Split(g_keyList, ",")
+	lock.RUnlock()
+
 	ret := ""
 	namespace := "ping"
 	for _, k := range keyList {
-		b, r := cache.GetInstance().Value(k)
-		if b && r != nil {
+		lock.RLock()
+		if v, ok := g_statMap[k]; ok {
 			l := strings.Split(k, "|")
 			ret += fmt.Sprintf("%s_max_delay{domain=\"%s\",addr=\"%s\"} %g\n",
-				namespace, l[0], l[1], r.(ping.PingSt).MaxDelay)
+				namespace, l[0], l[1], v.MaxDelay)
 			ret += fmt.Sprintf("%s_min_delay{domain=\"%s\",addr=\"%s\"} %g\n",
-				namespace, l[0], l[1], r.(ping.PingSt).MinDelay)
+				namespace, l[0], l[1], v.MinDelay)
 			ret += fmt.Sprintf("%s_avg_delay{domain=\"%s\",addr=\"%s\"} %g\n",
-				namespace, l[0], l[1], r.(ping.PingSt).AvgDelay)
+				namespace, l[0], l[1], v.AvgDelay)
 			ret += fmt.Sprintf("%s_send{domain=\"%s\",addr=\"%s\"} %g\n",
-				namespace, l[0], l[1], float64(r.(ping.PingSt).SendPk))
+				namespace, l[0], l[1], float64(v.SendPk))
 			ret += fmt.Sprintf("%s_lost{domain=\"%s\",addr=\"%s\"} %g\n",
-				namespace, l[0], l[1], float64(r.(ping.PingSt).LossPk))
+				namespace, l[0], l[1], float64(v.LossPk))
 		}
+		lock.RUnlock()
 	}
 
 	io.WriteString(w, ret)
@@ -157,6 +161,7 @@ func main() {
 	}
 
 	doing = false
+	g_statMap = make(map[string]ping.PingSt)
 	doWork()
 	c := cron.New()
 	c.AddFunc("0 */1 * * * ?", doWork)

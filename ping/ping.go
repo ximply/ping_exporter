@@ -10,7 +10,6 @@ import (
 	"golang.org/x/net/ipv4"
 	"math/rand"
 	"encoding/binary"
-	"github.com/ximply/ping_exporter/cache"
 	"fmt"
 )
 
@@ -229,10 +228,8 @@ func runPing(Addr string, maxrtt time.Duration, maxttl int, seq int) (float64, e
 	return float64(pingRsult.RTT.Nanoseconds()) / 1e6, pingRsult.Error
 }
 
-func StartPing(t string, count int) {
-
-	stat := PingSt{}
-	stat.MinDelay = -1
+func StartPing(t string, count int, ret *PingSt) {
+	ret.MinDelay = -1
 	lossPK := 0
 	maxCount := 5
 	if count > 0 {
@@ -242,41 +239,42 @@ func StartPing(t string, count int) {
 		//starttime := time.Now().UnixNano()
 		delay, err := runPing(t, 3 * time.Second, 254, i)
 		if err == nil {
-			stat.AvgDelay = stat.AvgDelay + delay
-			if stat.MaxDelay < delay {
-				stat.MaxDelay = delay
+			ret.AvgDelay = ret.AvgDelay + delay
+			if ret.MaxDelay < delay {
+				ret.MaxDelay = delay
 			}
-			if stat.MinDelay == -1 || stat.MinDelay > delay {
-				stat.MinDelay = delay
+			if ret.MinDelay == -1 || ret.MinDelay > delay {
+				ret.MinDelay = delay
 			}
-			stat.RevcPk = stat.RevcPk + 1
+			ret.RevcPk = ret.RevcPk + 1
 		} else {
 			lossPK = lossPK + 1
 		}
-		stat.SendPk = stat.SendPk + 1
-		stat.LossPk = int((float64(lossPK) / float64(stat.SendPk)) * 100)
+		ret.SendPk = ret.SendPk + 1
+		ret.LossPk = int((float64(lossPK) / float64(ret.SendPk)) * 100)
 		//duringtime := time.Now().UnixNano() - starttime
 		//time.Sleep(time.Duration(3000 * 1000000 - duringtime) * time.Nanosecond)
 		time.Sleep(800 * time.Millisecond)
 	}
-	stat.AvgDelay = stat.AvgDelay / float64(stat.SendPk)
-	cache.GetInstance().Add(t, 3 * time.Minute, stat)
+	ret.AvgDelay = ret.AvgDelay / float64(ret.SendPk)
 }
 
-func SystemCmdPing(ip string, count int) {
+func SystemCmdPing(ip string, count int, ret *PingSt) {
 	target := net.ParseIP(ip)
 	pr, err := PingWithArgs(target, fmt.Sprintf("-c %d -i 0.8", count))
 	if err != nil {
-		return
+		ret.SendPk = 0
+		ret.RevcPk = 0
+		ret.LossPk = 0
+		ret.MinDelay = 0.0
+		ret.MaxDelay = 0.0
+		ret.AvgDelay = 0.0
 	}
 
-	stat := PingSt{
-		SendPk: count,
-		RevcPk: pr.RevcPk,
-		LossPk: count - pr.RevcPk,
-		MaxDelay: pr.MaxDelay,
-		MinDelay: pr.MinDelay,
-		AvgDelay: pr.AvgDelay,
-	}
-	cache.GetInstance().Add(fmt.Sprintf("%s", ip), 3 * time.Minute, stat)
+	ret.SendPk = count
+	ret.RevcPk = pr.RevcPk
+	ret.LossPk = count - pr.RevcPk
+	ret.MinDelay = pr.MinDelay
+	ret.MaxDelay = pr.MaxDelay
+	ret.AvgDelay = pr.AvgDelay
 }
