@@ -63,7 +63,7 @@ func doWork() {
 			keyList = keyList + fmt.Sprintf(",%s|%s", target.Domain, target.Addr)
 			ipMap[target.Addr] = target.Addr
 		} else {
-			ipList, err := resolver.LookupHost(target.Addr)
+			ipList, err := resolver.LookupHost(target.Domain)
 			if err == nil {
 				for _, ip := range ipList {
 					var t = DestAddr{
@@ -71,9 +71,9 @@ func doWork() {
 						Addr: ip.String(),
 						Domain: target.Domain,
 					}
-					dl = append(dl, fmt.Sprintf("%s|%s", t.Domain, t.Addr))
-					keyList = keyList + fmt.Sprintf(",%s|%s", target.Domain, target.Addr)
-					ipMap[target.Addr] = target.Addr
+					dl = append(dl, fmt.Sprintf("%s|%s", target.Domain, t.Addr))
+					keyList = keyList + fmt.Sprintf(",%s|%s", target.Domain, t.Addr)
+					ipMap[t.Addr] = t.Addr
 				}
 			}
 		}
@@ -81,7 +81,7 @@ func doWork() {
 
 	lock.Lock()
 	g_keyList = keyList
-    lock.Unlock()
+	lock.Unlock()
 
 	var pingStatMap map[string]ping.PingSt
 	pingStatMap = make(map[string]ping.PingSt)
@@ -94,9 +94,9 @@ func doWork() {
 	for _, i := range dl {
 		l := strings.Split(i, "|")
 		if v, ok := pingStatMap[l[1]]; ok {
-            lock.Lock()
-            g_statMap[fmt.Sprintf("%s|%s", l[0], l[1])] = v
-            lock.Unlock()
+			lock.Lock()
+			g_statMap[i] = v
+			lock.Unlock()
 		}
 	}
 
@@ -106,13 +106,13 @@ func doWork() {
 func metrics(w http.ResponseWriter, r *http.Request) {
 	lock.RLock()
 	keyList := strings.Split(g_keyList, ",")
+	m := g_statMap
 	lock.RUnlock()
 
 	ret := ""
 	namespace := "ping"
 	for _, k := range keyList {
-		lock.RLock()
-		if v, ok := g_statMap[k]; ok {
+		if v, ok := m[k]; ok {
 			l := strings.Split(k, "|")
 			ret += fmt.Sprintf("%s_max_delay{domain=\"%s\",addr=\"%s\"} %g\n",
 				namespace, l[0], l[1], v.MaxDelay)
@@ -125,7 +125,6 @@ func metrics(w http.ResponseWriter, r *http.Request) {
 			ret += fmt.Sprintf("%s_lost{domain=\"%s\",addr=\"%s\"} %g\n",
 				namespace, l[0], l[1], float64(v.LossPk))
 		}
-		lock.RUnlock()
 	}
 
 	io.WriteString(w, ret)
@@ -152,6 +151,7 @@ func main() {
 			destList = append(destList, d)
 		} else if isDomain(i) {
 			d.Ip = false
+			d.Domain = i
 			destList = append(destList, d)
 		}
 	}
