@@ -87,7 +87,8 @@ func doWork() {
 	pingStatMap = make(map[string]ping.PingSt)
 	for k, _ := range ipMap {
 		stat := &ping.PingSt{}
-		ping.StartPing(k, *count, stat)
+		//ping.StartPing(k, *count, stat)
+		ping.SystemCmdPing(k, *count, stat)
 		pingStatMap[k] = *stat
 	}
 

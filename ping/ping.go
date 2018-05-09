@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"encoding/binary"
 	"fmt"
+	"os"
 )
 
 type PingSt struct {
@@ -45,6 +46,17 @@ type ICMP struct {
 	Error   error
 }
 
+func fileExists(file string) (bool, error) {
+	_, err := os.Stat(file)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
+}
+
 func PingWithArgs(ip net.IP, args ...string) (PingSt, error) {
 	args = append([]string{ip.String()}, args...)
 	return execute(args)
@@ -60,9 +72,14 @@ func execute(args []string) (PingSt, error) {
 		AvgDelay: 0.0,
 	}
 
-	path, err := exec.LookPath("ping")
-	if err != nil {
-		return pr, err
+	path := "/bin/ping"
+	exist, _ := fileExists(path)
+	if !exist {
+		path2, err := exec.LookPath("ping")
+		if err != nil {
+			return pr, err
+		}
+		path = path2
 	}
 
 	out, err := exec.Command(path, args...).Output()
