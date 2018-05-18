@@ -13,6 +13,7 @@ import (
 	"io"
 	"github.com/ximply/ping_exporter/ping"
 	"sync"
+	"time"
 )
 
 var (
@@ -88,8 +89,10 @@ func doWork() {
 	for k, _ := range ipMap {
 		stat := &ping.PingSt{}
 		//ping.StartPing(k, *count, stat)
-		ping.SystemCmdPing(k, *count, stat)
+		//ping.SystemCmdPing(k, *count, stat)
+		ping.MtrPing(k, *count, stat)
 		pingStatMap[k] = *stat
+		time.Sleep(2 * time.Second)
 	}
 
 	for _, i := range dl {

@@ -278,7 +278,7 @@ func StartPing(t string, count int, ret *PingSt) {
 
 func SystemCmdPing(ip string, count int, ret *PingSt) {
 	target := net.ParseIP(ip)
-	pr, err := PingWithArgs(target, fmt.Sprintf("-c %d -i 0.8", count))
+	pr, err := PingWithArgs(target, fmt.Sprintf("-c %d -i 1 -t 254", count))
 	if err != nil {
 		ret.SendPk = 0
 		ret.RevcPk = 0
@@ -294,4 +294,34 @@ func SystemCmdPing(ip string, count int, ret *PingSt) {
 	ret.MinDelay = pr.MinDelay
 	ret.MaxDelay = pr.MaxDelay
 	ret.AvgDelay = pr.AvgDelay
+}
+
+
+func MtrPing(ip string, count int, ret *PingSt) {
+	cmdStr := fmt.Sprintf("/usr/sbin/mtr --no-dns %s --report -c %d | tail -n 1 | awk '{print $3,$6,$7,$8}'", ip, count)
+	cmd := exec.Command("/bin/sh", "-c", cmdStr)
+	cmd.Wait()
+	out, err := cmd.Output()
+	res := string(out)
+	ret.SendPk = 0
+	ret.RevcPk = 0
+	ret.LossPk = 0
+	ret.MinDelay = 0.0
+	ret.MaxDelay = 0.0
+	ret.AvgDelay = 0.0
+	if err != nil {
+		return
+	}
+
+	res = strings.TrimRight(res, "\n")
+	resList := strings.Split(res, " ")
+	if len(resList) == 4 {
+		ret.SendPk = count
+		lost, _ := strconv.ParseFloat(strings.TrimRight(resList[0], "%"), 64)
+		ret.RevcPk = ret.SendPk - int((lost / float64(100.0)) * float64(ret.SendPk))
+		ret.LossPk = count - ret.RevcPk
+		ret.MinDelay, _ = strconv.ParseFloat(resList[2], 64)
+		ret.MaxDelay, _ = strconv.ParseFloat(resList[3], 64)
+		ret.AvgDelay, _ = strconv.ParseFloat(resList[1], 64)
+	}
 }
